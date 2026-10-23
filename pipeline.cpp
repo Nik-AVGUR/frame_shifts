@@ -39,6 +39,7 @@ int Pipeline::process_video()
 	signal(SIGINT,quit_handler);
 
 	std::shared_ptr<CameraInterface> cam = std::make_shared<CameraInterface>();
+	cam_quit_ = cam;   // иначе quit_handler обращается к пустому указателю при Ctrl+C
 	cam->open();
 
 	// Если захват видео не удался - вывод сообщения и завершение программы
@@ -81,7 +82,7 @@ int Pipeline::process_video()
 		shift = opticalflow.get_optical_flow(second);
 	}
 
-	int camera_vfov = calculate_vertical_fov(camera_hfov_, second.cols + 2*OFFSET, second.rows + 2*OFFSET_Y);
+	float camera_vfov = calculate_vertical_fov(camera_hfov_, second.cols + 2*OFFSET, second.rows + 2*OFFSET_Y);
 
 	float pixels_per_radian_h = (second.cols + 2*OFFSET) / (camera_hfov_*M_PI / 180);
     float pixels_per_radian_v = (second.rows + 2*OFFSET_Y) / (camera_vfov*M_PI / 180);
@@ -110,8 +111,10 @@ int Pipeline::process_video()
 		second = Mat(second, cropRect);
 		cv::cvtColor(second,second,cv::COLOR_BGR2GRAY);
 		
-		cv::imshow("video", second);
-		cv::waitKey(5);
+		if (show_video_) {
+			cv::imshow("video", second);
+			cv::waitKey(5);
+		}
 
 		// // Сравниваем соседние кадры
 		// auto result = frameProcessor_.MatchImages(first, firstInfo, second, secondInfo);
@@ -121,11 +124,60 @@ int Pipeline::process_video()
 
 		shift = opticalflow.get_optical_flow(second);
 
-		float flow_rate_x = shift.x / (pixels_per_radian_h * diff_btwn_capturing_imgs_sec);
-		float flow_rate_y = shift.y / (pixels_per_radian_v * diff_btwn_capturing_imgs_sec);
+		// ---- Качество ----
+		int quality;
+		int good_points = opticalflow.last_good_points();
+		if (good_points > 0) {
+			dropout_frames_ = 0;
+			quality = 255 * good_points / std::max(1, opticalflow.max_good_points());
+			quality = std::max(quality_measured_min_, std::min(255, quality));
+		} else if (opticalflow.last_was_forecast()) {
+			dropout_frames_ = 0;
+			quality = quality_forecast_;
+		} else {
+			dropout_frames_++;
+			quality = (dropout_frames_ <= max_dropout_frames_) ? quality_dropout_ : 0;
+		}
 
-		autopilot->write_optical_flow(shift.x, shift.y, flow_rate_x, flow_rate_y);
-		std::clog << "x shifts: " << shift.x << "  " << "y shifts: " << shift.y << std::endl;
+		// ---- Угловая скорость потока, рад/с (по точному дробному смещению) ----
+		float rate_x = 0.0f;
+		float rate_y = 0.0f;
+		if (quality > 0 && diff_btwn_capturing_imgs_sec > 0.0f) {
+			rate_x = shift.x / (pixels_per_radian_h * diff_btwn_capturing_imgs_sec);
+			rate_y = shift.y / (pixels_per_radian_v * diff_btwn_capturing_imgs_sec);
+		} else {
+			flow_x_residual_ = 0.0f;
+			flow_y_residual_ = 0.0f;
+		}
+
+		// ---- Интервал между отправками ----
+		// ArduPilot 4.4-4.6 умножает flow_x на интервал между приходом сообщений,
+		// поэтому делим на интервал между отправками, а не между кадрами
+		auto send_time = std::chrono::high_resolution_clock::now();
+		float dt_send = diff_btwn_capturing_imgs_sec;
+		if (have_last_send_time_) {
+			dt_send = std::chrono::duration<float>(send_time - last_send_time_).count();
+		}
+		if (dt_send <= 0.001f || dt_send > 0.5f) {
+			dt_send = (diff_btwn_capturing_imgs_sec > 0.001f) ? diff_btwn_capturing_imgs_sec : 0.04f;
+		}
+		last_send_time_ = send_time;
+		have_last_send_time_ = true;
+
+		// ---- Целые flow_x/y для 4.4-4.6 с переносом остатка округления ----
+		float fx = flow_gain_k_ * rate_x / dt_send + flow_x_residual_;
+		float fy = flow_gain_k_ * rate_y / dt_send + flow_y_residual_;
+		float int_flow_x = std::max(-32767.0f, std::min(32767.0f, std::round(fx)));
+		float int_flow_y = std::max(-32767.0f, std::min(32767.0f, std::round(fy)));
+		flow_x_residual_ = fx - int_flow_x;
+		flow_y_residual_ = fy - int_flow_y;
+
+		// flow_rate для 4.7+ масштабируется тем же K, чтобы FLOW_FXSCALER был одинаковым на всех прошивках
+		autopilot->write_optical_flow(int_flow_x, int_flow_y,
+									  flow_gain_k_ * rate_x, flow_gain_k_ * rate_y, quality);
+		std::clog << "shift: " << shift.x << " " << shift.y
+				  << "  rate: " << rate_x << " " << rate_y
+				  << "  quality: " << quality << std::endl;
 
 		previous_img_capture_time_ = frame_grabbed_time;
 	}

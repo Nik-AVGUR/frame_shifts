@@ -73,7 +73,8 @@ public:
 	Mavlink_Messages current_messages_;
 
 	void read_messages();
-	void write_optical_flow(float flow_x, float flow_y, float flow_rate_x, float flow_rate_y);
+	void write_optical_flow(float flow_x, float flow_y, float flow_rate_x, float flow_rate_y,
+							int quality = 255);
 
 	void start();
 	void stop();

@@ -179,7 +179,7 @@ handle_quit( int sig )
 
 void
 AutopilotInterface::
-write_optical_flow(float flow_x, float flow_y, float flow_rate_x, float flow_rate_y)
+write_optical_flow(float flow_x, float flow_y, float flow_rate_x, float flow_rate_y, int quality)
 {
 
     mavlink_optical_flow_t optical_flow;
@@ -190,7 +190,7 @@ write_optical_flow(float flow_x, float flow_y, float flow_rate_x, float flow_rat
     optical_flow.flow_y = flow_y;      // пиксели/сек
     optical_flow.flow_comp_m_x = 0;    // всегда 0, т.к. считаем, что камера всегда направлена вниз
     optical_flow.flow_comp_m_y = 0;    // всегда 0, т.к. считаем, что камера всегда направлена вниз
-    optical_flow.quality = 255;    // 0-255 (качество, по умолчанию 255)
+    optical_flow.quality = quality;    // 0-255, 0 - данные недостоверны
     optical_flow.ground_distance = -1; // метры (по умолчанию < 0, т.к. не знаем высоту)
     optical_flow.flow_rate_x = flow_rate_x;
     optical_flow.flow_rate_y = flow_rate_y;

@@ -15,9 +15,16 @@ public:
     ~OpticalFlowLkt();
 	cv::Point2f get_optical_flow(const cv::Mat& curr_image, bool rev_flow = false);
 
+    // Сведения о последнем результате для расчета качества потока
+    int last_good_points() const { return last_good_points_; }    // 0 - смещение не измерено
+    bool last_was_forecast() const { return last_was_forecast_; } // true - прогноз на время калибровки камеры
+    int max_good_points() const { return max_count_of_comparisons_; }
+
 private:
     
     cv::Mat prev_image_;
+    int last_good_points_ = 0;
+    bool last_was_forecast_ = false;
 	double crop_factor_ = 0.75;
 
 	// Параметры обнаружения углов Ши-Томаса
@@ -29,7 +36,7 @@ private:
 	// Параметры для расчета оптического потока алгоритмом Лукаса-Канаде
     cv::Size win_size_ = cv::Size(15, 15);
     int max_level_ = 2;
-    cv::TermCriteria criteria_ = cv::TermCriteria(cv::TermCriteria::EPS || cv::TermCriteria::COUNT, 20, 0.03);
+    cv::TermCriteria criteria_ = cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::COUNT, 20, 0.03);
 
     // Параметры для прогнозирования смещений в моменты работы адаптивной коррекции
     int iter_frames_for_forecast_ = 0;

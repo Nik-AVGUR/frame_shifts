@@ -11,6 +11,9 @@ OpticalFlowLkt::~OpticalFlowLkt()
 
 cv::Point2f OpticalFlowLkt::get_optical_flow(const cv::Mat &curr_image, bool rev_flow)
 {    
+    last_good_points_ = 0;
+    last_was_forecast_ = false;
+
     if (curr_image.empty()) {
         return cv::Point2f(0,0);
          //что-то нужно с этим сделать, как-то обработать
@@ -48,6 +51,7 @@ cv::Point2f OpticalFlowLkt::get_optical_flow(const cv::Mat &curr_image, bool rev
             std::clog << "Calibration started" << std::endl;
         }
         were_identic = is_identic;
+        last_was_forecast_ = true;
         return processing_calib_imgs(curr_image);
     } else if(were_identic){
         std::clog << "Calibration stopped" << std::endl;
@@ -130,6 +134,8 @@ cv::Point2f OpticalFlowLkt::get_optical_flow(const cv::Mat &curr_image, bool rev
         return cv::Point2f(0,0);
         // надо обработать
     }
+
+    last_good_points_ = static_cast<int>(good_new.size());
 
     std::vector<cv::Point2f> flow_vectors;
     for (size_t i = 0; i < good_new.size(); ++i) {
